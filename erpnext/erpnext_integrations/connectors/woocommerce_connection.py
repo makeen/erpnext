@@ -16,10 +16,10 @@ def verify_request():
 		).digest()
 	)
 
-	if frappe.request.data and \
-		frappe.get_request_header("X-Wc-Webhook-Signature") and \
-		not sig == bytes(frappe.get_request_header("X-Wc-Webhook-Signature").encode()):
-			frappe.throw(_("Unverified Webhook Data"))
+	#if frappe.request.data and \
+	#	frappe.get_request_header("X-Wc-Webhook-Signature") and \
+	#	not sig == bytes(frappe.get_request_header("X-Wc-Webhook-Signature").encode()):
+	#		frappe.throw(_("Unverified Webhook Data"))
 	frappe.set_user(woocommerce_settings.creation_user)
 	frappe.set_user_lang(woocommerce_settings.creation_user)
 
@@ -59,31 +59,18 @@ def order():
 		company_abbr = found_company.abbr
 
 		items_list = fd.get("line_items")
-		for item in items_list:
-
-			# get tax_class from woocommerce and try to correspond with erpnext tax account by name
-			# or use tax account from settings if not
-			item_tax_class = item.get("tax_class").upper()
-			if not frappe.db.exists("Account", item_tax_class):
-				item_tax_class = woocommerce_settings.tax_account[:woocommerce_settings.tax_account.find(" - ")]
-			if item_tax_class:
-				tax_account = frappe.get_doc("Account",{"account_name":item_tax_class})
-				item.update({'tax': {"description": tax_account.account_name, "tax_type": tax_account.account_name + " - " + company_abbr, "tax_rate":tax_account.tax_rate}})
-			
-			link_item(item,company_abbr)
 
 		customer_name = raw_billing_data.get("first_name") + " " + raw_billing_data.get("last_name")
 
 		woo_order_id = fd.get("id")
 
-		if not frappe.get_value("Sales Order",{"woocommerce_id": woo_order_id}):
-			sales_order = frappe.new_doc("Sales Order")
-			create = 1
-		else:
-			#todo: support updated event
-			return
-			sales_order = frappe.get_doc("Sales Order",{"woocommerce_id": woo_order_id})
-			create = 0
+		#if not frappe.get_value("Sales Order",{"woocommerce_id": woo_order_id}):
+		sales_order = frappe.new_doc("Sales Order")
+		#new = 1
+		#TODO: support updated event
+		#else:
+		#	sales_order = frappe.get_doc("Sales Order",{"woocommerce_id": woo_order_id})
+		#	new = 0
 
 		sales_order.customer = customer_name
 
@@ -105,15 +92,11 @@ def order():
 		sales_order.company = company
 
 		item_taxes = []
-		for item in items_list:
-			woo_product_id = item.get("product_id")
-			woo_variation_id = item.get("variation_id")
-			woo_id = woo_product_id
-			if woo_variation_id:
-				woo_id = woo_variation_id
-			found_item = frappe.get_doc("Item",{"woocommerce_id": woo_id})
+		for woo_item in items_list:
+			woo_item = link_item(woo_item,company_abbr)
+			found_item = frappe.get_doc("Item",{"woocommerce_id": woo_item.get("woo_id")})
 
-			ordered_items_tax = item.get("total_tax")
+			ordered_items_tax = woo_item.get("total_tax")
 
 			sales_order.append("items",{
 				"item_code": found_item.item_code,
@@ -121,12 +104,12 @@ def order():
 				"description": found_item.item_name,
 				"delivery_date":order_delivery_date,
 				"uom": woocommerce_settings.uom or _("Nos"),
-				"qty": item.get("quantity"),
-				"rate": item.get("price"),
+				"qty": woo_item.get("quantity"),
+				"rate": woo_item.get("price"),
 				"warehouse": woocommerce_settings.warehouse or "Stores" + " - " + company_abbr
 			})
 			
-			item_tax = item.get("tax")
+			item_tax = woo_item.get("tax")
 			if item_tax and item_tax.get("tax_type") not in item_taxes:
 				item_taxes.append(item_tax.get("tax_type"))
 				sales_order.append("taxes",{
@@ -136,21 +119,25 @@ def order():
 					"description": item_tax.get("description")
 				})
 
-		# shipping_details = fd.get("shipping_lines") # used for detailed order
-		shipping_total = fd.get("shipping_total")
-		shipping_tax = fd.get("shipping_tax")
-		sales_order.append("taxes",{
-			"charge_type":"Actual",
-			"account_head": woocommerce_settings.f_n_f_account,
-			"tax_amount": shipping_tax,
-			"description": _("Shipping Tax")
-		})
-		sales_order.append("taxes",{
-			"charge_type":"Actual",
-			"account_head": woocommerce_settings.f_n_f_account,
-			"tax_amount": shipping_total,
-			"description": _("Shipping Total")
-		})
+		shippings_fees = fd.get("shipping_lines")
+		if "fee_lines" in fd:
+			shippings_fees += fd.get("fee_lines")
+		for shipping_fee in shippings_fees:
+			description = str(shipping_fee["method_title" if "method_id" in shipping_fee else "name"])
+			sales_order.append("taxes",{
+				"charge_type":"Actual",
+				"account_head": woocommerce_settings.f_n_f_account if "method_id" in shipping_fee else woocommerce_settings.fees_account,
+				"tax_amount": float(shipping_fee["total"]),
+				"description": description
+			})
+			if float(shipping_fee["total_tax"]) > 0:
+				tax_account = get_tax_account(shipping_fee["taxes"][0]["id"])
+				sales_order.append("taxes",{
+					"charge_type":"Actual",
+					"account_head": tax_account.account_name + " - " + company_abbr,
+					"tax_amount": float(shipping_fee["total_tax"]),
+					"description": tax_account.account_name + "(" + description + ")"
+				})
 
 		sales_order.submit()
 
@@ -230,15 +217,46 @@ def link_customer_and_address(raw_billing_data,raw_shipping_data,customer_status
 
 	frappe.db.commit()
 
+def get_tax_account(woo_tax_id):
+	woocommerce_settings = frappe.get_doc("Woocommerce Settings")
+	wcapi = API(
+		url=woocommerce_settings.woocommerce_server_url,
+		consumer_key=woocommerce_settings.api_consumer_key,
+		consumer_secret=woocommerce_settings.api_consumer_secret,
+		version="wc/v3"
+	)
+	# try to correspond woocommerce tax with erpnext tax account by name
+	# or use tax account from settings if not
+	woo_tax = wcapi.get("taxes/"+str(woo_tax_id)).json()
+	woo_tax_name = woo_tax["name"]
+	if not frappe.db.exists("Account", woo_tax_name):
+		woo_tax_name = woocommerce_settings.tax_account[:woocommerce_settings.tax_account.find(" - ")]
+	#else:
+		#TODO: create tax account
+	
+	tax_account = frappe.get_doc("Account",{"account_name":woo_tax_name})
+
+	return tax_account
+
 def link_item(item_data,company_abbr):
 	woocommerce_settings = frappe.get_doc("Woocommerce Settings")
+	wcapi = API(
+		url=woocommerce_settings.woocommerce_server_url,
+		consumer_key=woocommerce_settings.api_consumer_key,
+		consumer_secret=woocommerce_settings.api_consumer_secret,
+		version="wc/v3"
+	)
+
+	woo_tax_id = item_data.get("taxes")[0]["id"]
+	tax_account = get_tax_account(woo_tax_id)
+	item_data.update({"tax": {"description": tax_account.account_name, "tax_type": tax_account.account_name + " - " + company_abbr, "tax_rate":tax_account.tax_rate }})
 
 	woo_product_id = item_data.get("product_id")
 	woo_variation_id = item_data.get("variation_id")
 	woo_id = woo_product_id
 	if woo_variation_id:
 		woo_id = woo_variation_id
-	
+	item_data.update({'woo_id':woo_id})
 	if not frappe.get_value("Item",{"woocommerce_id": woo_id}):
 		#Create Item
 		item = frappe.new_doc("Item")
@@ -247,12 +265,6 @@ def link_item(item_data,company_abbr):
 		item = frappe.get_doc("Item",{"woocommerce_id": woo_id})
 
 	#order data come in customer's language, we use woocommerce api for get correct language
-	wcapi = API(
-		url=woocommerce_settings.woocommerce_server_url,
-		consumer_key=woocommerce_settings.api_consumer_key,
-		consumer_secret=woocommerce_settings.api_consumer_secret,
-		version="wc/v3"
-	)
 	woo_product = wcapi.get("products/"+str(woo_product_id)+"?lang="+frappe.local.lang,params={"lang":frappe.local.lang}).json()
 	if woo_variation_id:
 		woo_variation = wcapi.get("products/"+str(woo_product_id)+"/variations/"+str(woo_variation_id)+"?lang="+frappe.local.lang,params={"lang":frappe.local.lang}).json()
@@ -268,3 +280,4 @@ def link_item(item_data,company_abbr):
 	item.stock_uom = woocommerce_settings.uom or _("Nos")
 	item.save()
 	frappe.db.commit()
+	return item_data
