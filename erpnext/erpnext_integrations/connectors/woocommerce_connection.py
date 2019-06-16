@@ -16,10 +16,10 @@ def verify_request():
 		).digest()
 	)
 
-	#if frappe.request.data and \
-	#	frappe.get_request_header("X-Wc-Webhook-Signature") and \
-	#	not sig == bytes(frappe.get_request_header("X-Wc-Webhook-Signature").encode()):
-	#		frappe.throw(_("Unverified Webhook Data"))
+	if frappe.request.data and \
+		frappe.get_request_header("X-Wc-Webhook-Signature") and \
+		not sig == bytes(frappe.get_request_header("X-Wc-Webhook-Signature").encode()):
+			frappe.throw(_("Unverified Webhook Data"))
 	frappe.set_user(woocommerce_settings.creation_user)
 	frappe.set_user_lang(woocommerce_settings.creation_user)
 
@@ -64,10 +64,12 @@ def order():
 
 		woo_order_id = fd.get("id")
 
-		#if not frappe.get_value("Sales Order",{"woocommerce_id": woo_order_id}):
-		sales_order = frappe.new_doc("Sales Order")
-		#new = 1
-		#TODO: support updated event
+		if not frappe.get_value("Sales Order",{"woocommerce_id": woo_order_id}):
+			sales_order = frappe.new_doc("Sales Order")
+			new = 1
+		else:
+			return
+		#TODO: support order.updated event
 		#else:
 		#	sales_order = frappe.get_doc("Sales Order",{"woocommerce_id": woo_order_id})
 		#	new = 0
