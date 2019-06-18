@@ -67,81 +67,78 @@ def order():
 		if not frappe.get_value("Sales Order",{"woocommerce_id": woo_order_id}):
 			sales_order = frappe.new_doc("Sales Order")
 			new = 1
+		
 		else:
-			return
-		#TODO: support order.updated event
-		#else:
-		#	sales_order = frappe.get_doc("Sales Order",{"woocommerce_id": woo_order_id})
-		#	new = 0
-
-		sales_order.customer = customer_name
-
-		created_date = fd.get("date_created").split("T")
-		sales_order.transaction_date = created_date[0]
-
-		sales_order.po_no = woo_order_id
-		sales_order.woocommerce_id = woo_order_id
-		sales_order.naming_series = woocommerce_settings.sales_order_series or "SO-WOO-"
-
-		placed_order_date = created_date[0]
-		raw_date = datetime.datetime.strptime(placed_order_date, "%Y-%m-%d")
-		raw_delivery_date = frappe.utils.add_to_date(raw_date,days = 7)
-		order_delivery_date_str = raw_delivery_date.strftime('%Y-%m-%d')
-		order_delivery_date = str(order_delivery_date_str)
-
-		sales_order.delivery_date = order_delivery_date
-	
-		sales_order.company = company
+			#TODO: support order.updated event
+			#sales_order = frappe.get_doc("Sales Order",{"woocommerce_id": woo_order_id})
+			new = 0
 
 		item_taxes = []
 		for woo_item in items_list:
 			woo_item = link_item(woo_item,company_abbr)
-			found_item = frappe.get_doc("Item",{"woocommerce_id": woo_item.get("woo_id")})
-
-			ordered_items_tax = woo_item.get("total_tax")
-
-			sales_order.append("items",{
-				"item_code": found_item.item_code,
-				"item_name": found_item.item_name,
-				"description": found_item.item_name,
-				"delivery_date":order_delivery_date,
-				"uom": woocommerce_settings.uom or _("Nos"),
-				"qty": woo_item.get("quantity"),
-				"rate": woo_item.get("price"),
-				"warehouse": woocommerce_settings.warehouse or "Stores" + " - " + company_abbr
-			})
-			
-			item_tax = woo_item.get("tax")
-			if item_tax and item_tax.get("tax_type") not in item_taxes:
-				item_taxes.append(item_tax.get("tax_type"))
-				sales_order.append("taxes",{
-					"charge_type":"On Net Total",
-					"account_head": item_tax.get("tax_type"),
-					"tax_rate": item_tax.get("tax_rate"),
-					"description": item_tax.get("description")
+			if new:
+				found_item = frappe.get_doc("Item",{"woocommerce_id": woo_item.get("woo_id")})
+				ordered_items_tax = woo_item.get("total_tax")
+				sales_order.append("items",{
+					"item_code": found_item.item_code,
+					"item_name": found_item.item_name,
+					"description": found_item.item_name,
+					"delivery_date":order_delivery_date,
+					"uom": woocommerce_settings.uom or _("Nos"),
+					"qty": woo_item.get("quantity"),
+					"rate": woo_item.get("price"),
+					"warehouse": woocommerce_settings.warehouse or "Stores" + " - " + company_abbr
 				})
+				item_tax = woo_item.get("tax")
+				if item_tax and item_tax.get("tax_type") not in item_taxes:
+					item_taxes.append(item_tax.get("tax_type"))
+					sales_order.append("taxes",{
+						"charge_type":"On Net Total",
+						"account_head": item_tax.get("tax_type"),
+						"tax_rate": item_tax.get("tax_rate"),
+						"description": item_tax.get("description")
+					})
+		if new:
+			sales_order.customer = customer_name
 
-		shippings_fees = fd.get("shipping_lines")
-		if "fee_lines" in fd:
-			shippings_fees += fd.get("fee_lines")
-		for shipping_fee in shippings_fees:
-			description = str(shipping_fee["method_title" if "method_id" in shipping_fee else "name"])
-			sales_order.append("taxes",{
-				"charge_type":"Actual",
-				"account_head": woocommerce_settings.f_n_f_account if "method_id" in shipping_fee else woocommerce_settings.fees_account,
-				"tax_amount": float(shipping_fee["total"]),
-				"description": description
-			})
-			if float(shipping_fee["total_tax"]) > 0:
-				tax_account = get_tax_account(shipping_fee["taxes"][0]["id"])
+			created_date = fd.get("date_created").split("T")
+			sales_order.transaction_date = created_date[0]
+
+			sales_order.po_no = woo_order_id
+			sales_order.woocommerce_id = woo_order_id
+			sales_order.naming_series = woocommerce_settings.sales_order_series or "SO-WOO-"
+
+			placed_order_date = created_date[0]
+			raw_date = datetime.datetime.strptime(placed_order_date, "%Y-%m-%d")
+			raw_delivery_date = frappe.utils.add_to_date(raw_date,days = 7)
+			order_delivery_date_str = raw_delivery_date.strftime('%Y-%m-%d')
+			order_delivery_date = str(order_delivery_date_str)
+
+			sales_order.delivery_date = order_delivery_date
+		
+			sales_order.company = company
+
+			shippings_fees = fd.get("shipping_lines")
+			if "fee_lines" in fd:
+				shippings_fees += fd.get("fee_lines")
+			for shipping_fee in shippings_fees:
+				description = str(shipping_fee["method_title" if "method_id" in shipping_fee else "name"])
 				sales_order.append("taxes",{
 					"charge_type":"Actual",
-					"account_head": tax_account.account_name + " - " + company_abbr,
-					"tax_amount": float(shipping_fee["total_tax"]),
-					"description": tax_account.account_name + "(" + description + ")"
+					"account_head": woocommerce_settings.f_n_f_account if "method_id" in shipping_fee else woocommerce_settings.fees_account,
+					"tax_amount": float(shipping_fee["total"]),
+					"description": description
 				})
+				if float(shipping_fee["total_tax"]) > 0:
+					tax_account = get_tax_account(shipping_fee["taxes"][0]["id"], company_abbr)
+					sales_order.append("taxes",{
+						"charge_type":"Actual",
+						"account_head": tax_account.account_name + " - " + company_abbr,
+						"tax_amount": float(shipping_fee["total_tax"]),
+						"description": tax_account.account_name + "(" + description + ")"
+					})
 
-		sales_order.submit()
+			sales_order.submit()
 
 		frappe.db.commit()
 
@@ -219,7 +216,7 @@ def link_customer_and_address(raw_billing_data,raw_shipping_data,customer_status
 
 	frappe.db.commit()
 
-def get_tax_account(woo_tax_id):
+def get_tax_account(woo_tax_id, company_abbr):
 	woocommerce_settings = frappe.get_doc("Woocommerce Settings")
 	wcapi = API(
 		url=woocommerce_settings.woocommerce_server_url,
@@ -231,11 +228,11 @@ def get_tax_account(woo_tax_id):
 	# or use tax account from settings if not
 	woo_tax = wcapi.get("taxes/"+str(woo_tax_id)).json()
 	woo_tax_name = woo_tax["name"]
-	if not frappe.db.exists("Account", woo_tax_name):
+	if not frappe.db.exists("Account", woo_tax_name + " - " + company_abbr):
 		woo_tax_name = woocommerce_settings.tax_account[:woocommerce_settings.tax_account.find(" - ")]
 	#else:
 		#TODO: create tax account
-	
+
 	tax_account = frappe.get_doc("Account",{"account_name":woo_tax_name})
 
 	return tax_account
@@ -250,7 +247,7 @@ def link_item(item_data,company_abbr):
 	)
 
 	woo_tax_id = item_data.get("taxes")[0]["id"]
-	tax_account = get_tax_account(woo_tax_id)
+	tax_account = get_tax_account(woo_tax_id, company_abbr)
 	item_data.update({"tax": {"description": tax_account.account_name, "tax_type": tax_account.account_name + " - " + company_abbr, "tax_rate":tax_account.tax_rate }})
 
 	woo_product_id = item_data.get("product_id")
