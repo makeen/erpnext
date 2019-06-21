@@ -222,9 +222,9 @@ class calculate_taxes_and_totals(object):
 					tax.grand_total_for_current_item = \
 						flt(self.doc.get("taxes")[i-1].grand_total_for_current_item + current_tax_amount)
 
+				self.round_off_totals(tax)
 				# set precision in the last item iteration
-				if n == len(self.doc.get("items")) - 1:
-					self.round_off_totals(tax)
+				if n == len(self.doc.get("items")) - 1:					
 					self.set_cumulative_total(i, tax)
 
 					self._set_in_company_currency(tax,

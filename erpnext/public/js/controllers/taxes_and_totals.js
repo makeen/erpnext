@@ -272,9 +272,9 @@ erpnext.taxes_and_totals = erpnext.payments.extend({
 						flt(me.frm.doc["taxes"][i-1].grand_total_for_current_item + current_tax_amount);
 				}
 
+				me.round_off_totals(tax);
 				// set precision in the last item iteration
 				if (n == me.frm.doc["items"].length - 1) {
-					me.round_off_totals(tax);
 
 					// in tax.total, accumulate grand total for each item
 					me.set_cumulative_total(i, tax);
