@@ -38,6 +38,7 @@ class WoocommerceSettings(Document):
 					custom.dt = name
 					custom.label = "woocommerce_id"
 					custom.read_only = 1
+					custom.print_hide = 1
 					custom.save()
 
 					custom = frappe.new_doc("Custom Field")
@@ -45,6 +46,7 @@ class WoocommerceSettings(Document):
 					custom.label = "woocommerce_check"
 					custom.fieldtype = "Check"
 					custom.read_only = 1
+					custom.print_hide = 1
 					custom.save()
 
 			for i in email_names:
@@ -60,6 +62,7 @@ class WoocommerceSettings(Document):
 					custom.dt = name
 					custom.label = "woocommerce_email"
 					custom.read_only = 1
+					custom.print_hide = 1
 					custom.save()
 
 			if not frappe.get_value("Item Group",{"name": _("WooCommerce Products")}):

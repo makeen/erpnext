@@ -106,18 +106,15 @@ def order():
 					"rate": woo_item.get("price"),
 					"warehouse": woocommerce_settings.warehouse or "Stores" + " - " + company_abbr
 				})
-				item_tax = woo_item.get("taxes")
-				if item_tax:
-					item_tax_template = frappe.get_doc("Item Tax Template",item_tax.get("item_tax_template"))
-					for tax in item_tax_template.get("taxes"):
-						if tax.get("tax_type") not in item_taxes:
-							item_taxes.append(tax.get("tax_type"))
-							sales_order.append("taxes",{
-								"charge_type":"On Net Total",
-								"account_head": tax.get("tax_type"),
-								"tax_rate": tax.get("tax_rate"),
-								"description": tax.get("tax_type")
-							})
+				for tax in woo_item.get("taxes"):
+					if tax.account_name not in item_taxes:
+						item_taxes.append(tax.account_name)
+						sales_order.append("taxes",{
+							"charge_type":"On Net Total",
+							"account_head": tax.account_name + " - " + company_abbr,
+							"tax_rate": tax.tax_rate,
+							"description": tax.account_name
+						})
 
 		sales_order.delivery_date = order_delivery_date
 
@@ -140,7 +137,7 @@ def order():
 					"charge_type":"Actual",
 					"account_head": tax_account.account_name + " - " + company_abbr,
 					"tax_amount": float(shipping_fee["total_tax"]),
-					"description": tax_account.account_name + "(" + description + ")"
+					"description": tax_account.account_name + " (" + _(description) + ")"
 				})
 
 		sales_order.submit()
@@ -282,8 +279,10 @@ def link_item(item_data):
 
 	woo_tax_id = item_data.get("tax_class")
 	item_tax_template = get_item_tax_template(woo_tax_id)
-	item_data.update({"taxes": {"item_tax_template": item_tax_template.name}})
-
+	taxes_account = []
+	for tax in item_tax_template.get("taxes"):
+		taxes_account.append(frappe.get_doc("Account",tax.get("tax_type")))
+	item_data.update({"taxes": taxes_account})
 	woo_product_id = item_data.get("product_id")
 	woo_variation_id = item_data.get("variation_id")
 	woo_id = woo_product_id
